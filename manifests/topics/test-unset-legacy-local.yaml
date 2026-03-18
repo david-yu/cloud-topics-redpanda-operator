@@ -1,0 +1,16 @@
+# Test 7b: Legacy local behavior when storage.mode=unset.
+# Pre-condition: default_redpanda_storage_mode=unset
+# Expected: remote.read=false, remote.write=false disables tiered storage
+apiVersion: cluster.redpanda.com/v1alpha2
+kind: Topic
+metadata:
+  name: test-unset-legacy-local
+spec:
+  partitions: 1
+  replicationFactor: 3
+  additionalConfig:
+    redpanda.remote.read: "false"
+    redpanda.remote.write: "false"
+  cluster:
+    clusterRef:
+      name: redpanda

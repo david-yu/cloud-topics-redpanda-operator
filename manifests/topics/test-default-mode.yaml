@@ -1,0 +1,12 @@
+# Test 2: Topic with default settings.
+# Expected: redpanda.storage.mode=unset (inherits cluster default)
+apiVersion: cluster.redpanda.com/v1alpha2
+kind: Topic
+metadata:
+  name: test-default-mode
+spec:
+  partitions: 1
+  replicationFactor: 3
+  cluster:
+    clusterRef:
+      name: redpanda

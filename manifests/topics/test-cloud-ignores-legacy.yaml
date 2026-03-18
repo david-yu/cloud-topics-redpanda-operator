@@ -1,0 +1,16 @@
+# Test 8c: storage.mode=cloud ignores remote.read/write=false.
+# Expected: storage.mode=cloud takes precedence; remote.read/write have no meaning for cloud topics
+apiVersion: cluster.redpanda.com/v1alpha2
+kind: Topic
+metadata:
+  name: test-cloud-ignores-legacy
+spec:
+  partitions: 1
+  replicationFactor: 3
+  additionalConfig:
+    redpanda.storage.mode: "cloud"
+    redpanda.remote.read: "false"
+    redpanda.remote.write: "false"
+  cluster:
+    clusterRef:
+      name: redpanda

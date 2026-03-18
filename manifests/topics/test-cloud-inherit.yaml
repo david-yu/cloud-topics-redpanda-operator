@@ -1,0 +1,13 @@
+# Test 3: Topic that inherits cloud storage mode from cluster.
+# Pre-condition: default_redpanda_storage_mode=cloud
+# Expected: redpanda.storage.mode=cloud (DEFAULT_CONFIG)
+apiVersion: cluster.redpanda.com/v1alpha2
+kind: Topic
+metadata:
+  name: test-cloud-inherit
+spec:
+  partitions: 1
+  replicationFactor: 3
+  cluster:
+    clusterRef:
+      name: redpanda

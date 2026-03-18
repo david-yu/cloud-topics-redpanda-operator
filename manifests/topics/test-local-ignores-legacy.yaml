@@ -1,0 +1,16 @@
+# Test 8b: storage.mode=local ignores remote.read/write=true.
+# Expected: storage.mode=local takes precedence; topic is local regardless of remote.read/write
+apiVersion: cluster.redpanda.com/v1alpha2
+kind: Topic
+metadata:
+  name: test-local-ignores-legacy
+spec:
+  partitions: 1
+  replicationFactor: 3
+  additionalConfig:
+    redpanda.storage.mode: "local"
+    redpanda.remote.read: "true"
+    redpanda.remote.write: "true"
+  cluster:
+    clusterRef:
+      name: redpanda

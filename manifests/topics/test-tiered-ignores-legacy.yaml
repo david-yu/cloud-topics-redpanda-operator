@@ -1,0 +1,16 @@
+# Test 8a: storage.mode=tiered ignores remote.read/write=false.
+# Expected: storage.mode=tiered takes precedence; topic is tiered regardless of remote.read/write
+apiVersion: cluster.redpanda.com/v1alpha2
+kind: Topic
+metadata:
+  name: test-tiered-ignores-legacy
+spec:
+  partitions: 1
+  replicationFactor: 3
+  additionalConfig:
+    redpanda.storage.mode: "tiered"
+    redpanda.remote.read: "false"
+    redpanda.remote.write: "false"
+  cluster:
+    clusterRef:
+      name: redpanda

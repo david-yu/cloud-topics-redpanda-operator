@@ -1,0 +1,13 @@
+# Test 6: Topic that inherits local storage mode from cluster.
+# Pre-condition: default_redpanda_storage_mode=local
+# Expected: redpanda.storage.mode=local (DEFAULT_CONFIG)
+apiVersion: cluster.redpanda.com/v1alpha2
+kind: Topic
+metadata:
+  name: test-local-inherit
+spec:
+  partitions: 1
+  replicationFactor: 3
+  cluster:
+    clusterRef:
+      name: redpanda

@@ -1,0 +1,16 @@
+# Test 7a: Legacy tiered storage behavior when storage.mode=unset.
+# Pre-condition: default_redpanda_storage_mode=unset
+# Expected: remote.read=true, remote.write=true control tiered storage
+apiVersion: cluster.redpanda.com/v1alpha2
+kind: Topic
+metadata:
+  name: test-unset-legacy-tiered
+spec:
+  partitions: 1
+  replicationFactor: 3
+  additionalConfig:
+    redpanda.remote.read: "true"
+    redpanda.remote.write: "true"
+  cluster:
+    clusterRef:
+      name: redpanda

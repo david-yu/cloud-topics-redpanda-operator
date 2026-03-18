@@ -1,0 +1,52 @@
+# Redpanda cluster with cloud_topics_enabled=true.
+# Apply this after the base cluster is running.
+# After reconciliation and restart, set default_redpanda_storage_mode via rpk:
+#   kubectl exec -n redpanda redpanda-0 -c redpanda -- \
+#     rpk cluster config set default_redpanda_storage_mode cloud
+apiVersion: cluster.redpanda.com/v1alpha2
+kind: Redpanda
+metadata:
+  name: redpanda
+spec:
+  clusterSpec:
+    image:
+      repository: redpandadata/redpanda-unstable
+      tag: v26.1.1-rc3
+    statefulset:
+      replicas: 3
+      initContainers:
+        setDataDirOwnership:
+          enabled: true
+    tls:
+      enabled: false
+    external:
+      enabled: false
+    auth:
+      sasl:
+        enabled: false
+    storage:
+      persistentVolume:
+        enabled: true
+        size: 5Gi
+      tiered:
+        mountType: none
+        credentialsSecretRef:
+          accessKey:
+            name: cloud-storage-creds
+            key: access-key
+          secretKey:
+            name: cloud-storage-creds
+            key: secret-key
+        config:
+          cloud_storage_enabled: true
+          cloud_storage_enable_remote_read: true
+          cloud_storage_enable_remote_write: true
+          cloud_storage_region: us-east-1
+          cloud_storage_bucket: redpanda-bucket
+          cloud_storage_api_endpoint: http://minio.redpanda.svc.cluster.local:9000
+          cloud_storage_api_endpoint_port: 9000
+          cloud_storage_disable_tls: true
+          cloud_storage_credentials_source: config_file
+    config:
+      cluster:
+        cloud_topics_enabled: true

@@ -1,0 +1,13 @@
+# Test 5: Topic that inherits tiered storage mode from cluster.
+# Pre-condition: default_redpanda_storage_mode=tiered
+# Expected: redpanda.storage.mode=tiered (DEFAULT_CONFIG)
+apiVersion: cluster.redpanda.com/v1alpha2
+kind: Topic
+metadata:
+  name: test-tiered-inherit
+spec:
+  partitions: 1
+  replicationFactor: 3
+  cluster:
+    clusterRef:
+      name: redpanda
