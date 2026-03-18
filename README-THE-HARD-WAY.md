@@ -218,7 +218,7 @@ EOF
 
 ### 3.1 Deploy the base Redpanda cluster
 
-This deploys a 3-node Redpanda cluster with cloud storage enabled (pointing at MinIO) but with default cluster configuration (`default_redpanda_storage_mode` will be `unset`).
+This deploys a 3-node Redpanda cluster with cloud storage enabled (pointing at MinIO) but with default cluster configuration (`default_redpanda_storage_mode` will be `unset`). In `v26.1.1-rc3`, `cloud_topics_enabled` is `true` by default, so no additional cluster config is needed.
 
 ```bash
 kubectl apply -n redpanda -f - <<'EOF'
@@ -258,8 +258,6 @@ spec:
             key: secret-key
         config:
           cloud_storage_enabled: true
-          cloud_storage_enable_remote_read: true
-          cloud_storage_enable_remote_write: true
           cloud_storage_region: us-east-1
           cloud_storage_bucket: redpanda-bucket
           cloud_storage_api_endpoint: http://minio.redpanda.svc.cluster.local:9000
@@ -359,11 +357,9 @@ redpanda.storage.mode=unset (DEFAULT_CONFIG)
 
 ---
 
-### Test 3: Enable `cloud_topics_enabled` via the Redpanda CR
+### Test 3: Set `default_redpanda_storage_mode=cloud` via the Redpanda CR
 
-Before we can set `default_redpanda_storage_mode=cloud`, we must enable `cloud_topics_enabled`. This requires a cluster restart to take effect.
-
-**Step 1** - Update the Redpanda CR to add `cloud_topics_enabled: true`:
+Update the CR to set the default storage mode to `cloud`:
 
 ```bash
 kubectl apply -n redpanda -f - <<'EOF'
@@ -403,8 +399,6 @@ spec:
             key: secret-key
         config:
           cloud_storage_enabled: true
-          cloud_storage_enable_remote_read: true
-          cloud_storage_enable_remote_write: true
           cloud_storage_region: us-east-1
           cloud_storage_bucket: redpanda-bucket
           cloud_storage_api_endpoint: http://minio.redpanda.svc.cluster.local:9000
@@ -413,98 +407,6 @@ spec:
           cloud_storage_credentials_source: config_file
     config:
       cluster:
-        cloud_topics_enabled: true
-EOF
-```
-
-**Step 2** - Wait for the operator to reconcile:
-
-```bash
-kubectl get redpanda -n redpanda -w
-```
-
-Wait until you see `True` in the READY column, then Ctrl-C.
-
-**Step 3** - `cloud_topics_enabled` requires a broker restart. Trigger a rolling restart:
-
-```bash
-kubectl rollout restart statefulset redpanda -n redpanda
-```
-
-**Step 4** - Wait for all pods to come back:
-
-```bash
-kubectl wait --for=condition=Ready pod/redpanda-0 pod/redpanda-1 pod/redpanda-2 \
-  -n redpanda --timeout=300s
-```
-
-**Step 5** - Verify `cloud_topics_enabled` is active:
-
-```bash
-kubectl exec -n redpanda redpanda-0 -c redpanda -- rpk cluster config get cloud_topics_enabled
-```
-
-Expected:
-
-```
-true
-```
-
----
-
-### Test 4: Set `default_redpanda_storage_mode=cloud` via the Redpanda CR
-
-Now that `cloud_topics_enabled` is active, update the CR to set the default storage mode:
-
-```bash
-kubectl apply -n redpanda -f - <<'EOF'
-apiVersion: cluster.redpanda.com/v1alpha2
-kind: Redpanda
-metadata:
-  name: redpanda
-spec:
-  clusterSpec:
-    image:
-      repository: redpandadata/redpanda-unstable
-      tag: v26.1.1-rc3
-    statefulset:
-      replicas: 3
-      initContainers:
-        setDataDirOwnership:
-          enabled: true
-    tls:
-      enabled: false
-    external:
-      enabled: false
-    auth:
-      sasl:
-        enabled: false
-    storage:
-      persistentVolume:
-        enabled: true
-        size: 5Gi
-      tiered:
-        mountType: none
-        credentialsSecretRef:
-          accessKey:
-            name: cloud-storage-creds
-            key: access-key
-          secretKey:
-            name: cloud-storage-creds
-            key: secret-key
-        config:
-          cloud_storage_enabled: true
-          cloud_storage_enable_remote_read: true
-          cloud_storage_enable_remote_write: true
-          cloud_storage_region: us-east-1
-          cloud_storage_bucket: redpanda-bucket
-          cloud_storage_api_endpoint: http://minio.redpanda.svc.cluster.local:9000
-          cloud_storage_api_endpoint_port: 9000
-          cloud_storage_disable_tls: true
-          cloud_storage_credentials_source: config_file
-    config:
-      cluster:
-        cloud_topics_enabled: true
         default_redpanda_storage_mode: cloud
 EOF
 ```
@@ -543,7 +445,7 @@ ConfigurationApplied: True (Synced)
 
 ---
 
-### Test 5: Topic inherits `cloud` from cluster default
+### Test 4: Topic inherits `cloud` from cluster default
 
 Create a topic without specifying `redpanda.storage.mode`:
 
@@ -587,7 +489,7 @@ redpanda.storage.mode=cloud (DEFAULT_CONFIG)
 
 ---
 
-### Test 6: Topic-level override - cluster=cloud, topic=local
+### Test 5: Topic-level override - cluster=cloud, topic=local
 
 Create a topic that explicitly sets `redpanda.storage.mode=local` while the cluster default is `cloud`:
 
@@ -627,7 +529,7 @@ redpanda.storage.mode=local (DYNAMIC_TOPIC_CONFIG)
 
 ---
 
-### Test 7: Set `default_redpanda_storage_mode=tiered` via CR and verify topic inheritance
+### Test 6: Set `default_redpanda_storage_mode=tiered` via CR and verify topic inheritance
 
 Update the Redpanda CR:
 
@@ -669,8 +571,6 @@ spec:
             key: secret-key
         config:
           cloud_storage_enabled: true
-          cloud_storage_enable_remote_read: true
-          cloud_storage_enable_remote_write: true
           cloud_storage_region: us-east-1
           cloud_storage_bucket: redpanda-bucket
           cloud_storage_api_endpoint: http://minio.redpanda.svc.cluster.local:9000
@@ -679,7 +579,6 @@ spec:
           cloud_storage_credentials_source: config_file
     config:
       cluster:
-        cloud_topics_enabled: true
         default_redpanda_storage_mode: tiered
 EOF
 ```
@@ -728,7 +627,7 @@ redpanda.storage.mode=tiered (DEFAULT_CONFIG)
 
 ---
 
-### Test 8: Set `default_redpanda_storage_mode=local` via CR and verify topic inheritance
+### Test 7: Set `default_redpanda_storage_mode=local` via CR and verify topic inheritance
 
 Update the Redpanda CR (change only the `default_redpanda_storage_mode` line):
 
@@ -770,8 +669,6 @@ spec:
             key: secret-key
         config:
           cloud_storage_enabled: true
-          cloud_storage_enable_remote_read: true
-          cloud_storage_enable_remote_write: true
           cloud_storage_region: us-east-1
           cloud_storage_bucket: redpanda-bucket
           cloud_storage_api_endpoint: http://minio.redpanda.svc.cluster.local:9000
@@ -780,7 +677,6 @@ spec:
           cloud_storage_credentials_source: config_file
     config:
       cluster:
-        cloud_topics_enabled: true
         default_redpanda_storage_mode: local
 EOF
 ```
@@ -829,9 +725,9 @@ redpanda.storage.mode=local (DEFAULT_CONFIG)
 
 ---
 
-### Test 9: Reset to `unset` and verify legacy `remote.read`/`remote.write` behavior
+### Test 8: Set `default_redpanda_storage_mode=unset` via CR (reset to default)
 
-Update the Redpanda CR to set `default_redpanda_storage_mode=unset`:
+Update the Redpanda CR to reset the storage mode back to `unset`:
 
 ```bash
 kubectl apply -n redpanda -f - <<'EOF'
@@ -871,8 +767,6 @@ spec:
             key: secret-key
         config:
           cloud_storage_enabled: true
-          cloud_storage_enable_remote_read: true
-          cloud_storage_enable_remote_write: true
           cloud_storage_region: us-east-1
           cloud_storage_bucket: redpanda-bucket
           cloud_storage_api_endpoint: http://minio.redpanda.svc.cluster.local:9000
@@ -881,7 +775,6 @@ spec:
           cloud_storage_credentials_source: config_file
     config:
       cluster:
-        cloud_topics_enabled: true
         default_redpanda_storage_mode: unset
 EOF
 ```
@@ -893,6 +786,16 @@ kubectl exec -n redpanda redpanda-0 -c redpanda -- rpk cluster config get defaul
 ```
 
 Expected: `unset`
+
+**Result: PASS** - Cluster storage mode successfully reset to `unset`.
+
+---
+
+### Test 9: Legacy `remote.read`/`remote.write` behavior when `storage.mode=unset`
+
+**These tests are not part of the core `redpanda.storage.mode` validation. They are included only to demonstrate backwards compatibility with the legacy `redpanda.remote.read` and `redpanda.remote.write` topic properties, which predate the `redpanda.storage.mode` feature.**
+
+When `redpanda.storage.mode=unset`, the legacy `remote.read`/`remote.write` properties continue to control a topic's tiered storage permissions, preserving the pre-`storage.mode` behavior.
 
 #### Test 9a: Legacy tiered - `remote.read=true`, `remote.write=true`
 
@@ -972,7 +875,7 @@ redpanda.storage.mode=unset (DEFAULT_CONFIG)
 
 ### Test 10: `storage.mode` takes precedence over legacy `remote.read`/`remote.write`
 
-When `redpanda.storage.mode` is explicitly set to any non-`unset` value, the legacy `remote.read`/`remote.write` properties have **no effect** on the topic's actual storage behavior.
+**These tests are not part of the core `redpanda.storage.mode` validation. They are included only to demonstrate backwards compatibility: when `redpanda.storage.mode` is explicitly set to any non-`unset` value, the legacy `redpanda.remote.read`/`redpanda.remote.write` properties have no effect on the topic's actual storage behavior.**
 
 #### Test 10a: `storage.mode=tiered` ignores `remote.read/write=false`
 
@@ -1096,34 +999,23 @@ redpanda.storage.mode=cloud (DYNAMIC_TOPIC_CONFIG)
 |---|-----------|-------------|--------|--------|
 | 1 | Default `default_redpanda_storage_mode` | `unset` | cluster config | **PASS** |
 | 2 | Topic with no explicit storage mode | `unset` | `DEFAULT_CONFIG` | **PASS** |
-| 3 | Enable `cloud_topics_enabled` via CR | - | cluster config | **PASS** |
-| 4 | Set `default_redpanda_storage_mode=cloud` via CR | `cloud` | cluster config | **PASS** |
-| 5 | Topic inherits `cloud` from cluster | `cloud` | `DEFAULT_CONFIG` | **PASS** |
-| 6 | Topic overrides cluster `cloud` with `local` | `local` | `DYNAMIC_TOPIC_CONFIG` | **PASS** |
-| 7 | Cluster `default_redpanda_storage_mode=tiered` via CR, topic inherits | `tiered` | `DEFAULT_CONFIG` | **PASS** |
-| 8 | Cluster `default_redpanda_storage_mode=local` via CR, topic inherits | `local` | `DEFAULT_CONFIG` | **PASS** |
-| 9a | `unset` + `remote.read/write=true` (legacy tiered) | `unset` | `DEFAULT_CONFIG` | **PASS** |
-| 9b | `unset` + `remote.read/write=false` (legacy local) | `unset` | `DYNAMIC_TOPIC_CONFIG` | **PASS** |
-| 10a | `tiered` ignores `remote.read/write=false` | `tiered` | `DYNAMIC_TOPIC_CONFIG` | **PASS** |
-| 10b | `local` ignores `remote.read/write=true` | `local` | `DYNAMIC_TOPIC_CONFIG` | **PASS** |
-| 10c | `cloud` ignores `remote.read/write=false` | `cloud` | `DYNAMIC_TOPIC_CONFIG` | **PASS** |
+| 3 | Set `default_redpanda_storage_mode=cloud` via CR | `cloud` | cluster config | **PASS** |
+| 4 | Topic inherits `cloud` from cluster | `cloud` | `DEFAULT_CONFIG` | **PASS** |
+| 5 | Topic overrides cluster `cloud` with `local` | `local` | `DYNAMIC_TOPIC_CONFIG` | **PASS** |
+| 6 | Cluster `default_redpanda_storage_mode=tiered` via CR, topic inherits | `tiered` | `DEFAULT_CONFIG` | **PASS** |
+| 7 | Cluster `default_redpanda_storage_mode=local` via CR, topic inherits | `local` | `DEFAULT_CONFIG` | **PASS** |
+| 8 | Reset `default_redpanda_storage_mode=unset` via CR | `unset` | cluster config | **PASS** |
+| 9a | *(Backwards compat)* `unset` + `remote.read/write=true` | `unset` | `DEFAULT_CONFIG` | **PASS** |
+| 9b | *(Backwards compat)* `unset` + `remote.read/write=false` | `unset` | `DYNAMIC_TOPIC_CONFIG` | **PASS** |
+| 10a | *(Backwards compat)* `tiered` ignores `remote.read/write=false` | `tiered` | `DYNAMIC_TOPIC_CONFIG` | **PASS** |
+| 10b | *(Backwards compat)* `local` ignores `remote.read/write=true` | `local` | `DYNAMIC_TOPIC_CONFIG` | **PASS** |
+| 10c | *(Backwards compat)* `cloud` ignores `remote.read/write=false` | `cloud` | `DYNAMIC_TOPIC_CONFIG` | **PASS** |
 
 **All 13 tests passed.**
 
 ---
 
-## Important Notes
-
-### Two-Phase Deployment for Cloud Mode
-
-Setting `default_redpanda_storage_mode=cloud` requires `cloud_topics_enabled=true` to be active first. Since `cloud_topics_enabled` requires a broker restart, you must deploy in two phases:
-
-1. **Phase 1**: Apply the Redpanda CR with `cloud_topics_enabled: true` only. Wait for reconciliation, then trigger a rolling restart (`kubectl rollout restart statefulset redpanda -n redpanda`).
-2. **Phase 2**: Update the CR to also include `default_redpanda_storage_mode: cloud`. The operator can now apply this because `cloud_topics_enabled` is already active.
-
-If both are set simultaneously on a fresh cluster, the operator's config API request will fail with a validation error because `cloud_topics_enabled` has not yet taken effect.
-
-### Storage Mode Behavior Summary
+## Storage Mode Behavior Summary
 
 | `redpanda.storage.mode` | Behavior | `remote.read`/`remote.write` relevance |
 |--------------------------|----------|----------------------------------------|
