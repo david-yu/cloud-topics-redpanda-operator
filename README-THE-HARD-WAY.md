@@ -218,7 +218,7 @@ EOF
 
 ### 3.1 Deploy the base Redpanda cluster
 
-This deploys a 3-node Redpanda cluster with cloud storage enabled (pointing at MinIO) but with default cluster configuration (`default_redpanda_storage_mode` will be `unset`). In `v26.1.1-rc3`, `cloud_topics_enabled` is `true` by default, so no additional cluster config is needed.
+This deploys a 3-node Redpanda cluster with cloud storage enabled (pointing at MinIO) and `cloud_topics_enabled: true` in the cluster config. The default `default_redpanda_storage_mode` will be `unset`.
 
 ```bash
 kubectl apply -n redpanda -f - <<'EOF'
@@ -265,7 +265,8 @@ spec:
           cloud_storage_disable_tls: true
           cloud_storage_credentials_source: config_file
     config:
-      cluster: {}
+      cluster:
+        cloud_topics_enabled: true
 EOF
 ```
 
@@ -289,7 +290,34 @@ NAME       READY   STATUS
 redpanda   True    Cluster ready to service requests
 ```
 
-### 3.2 Verify default cluster storage mode
+### 3.2 Activate `cloud_topics_enabled`
+
+The base cluster config includes `cloud_topics_enabled: true`, but this property requires a broker restart to take effect. Trigger a rolling restart:
+
+```bash
+kubectl rollout restart statefulset redpanda -n redpanda
+```
+
+Wait for all pods to come back:
+
+```bash
+kubectl wait --for=condition=Ready pod/redpanda-0 pod/redpanda-1 pod/redpanda-2 \
+  -n redpanda --timeout=300s
+```
+
+Verify `cloud_topics_enabled` is active:
+
+```bash
+kubectl exec -n redpanda redpanda-0 -c redpanda -- rpk cluster config get cloud_topics_enabled
+```
+
+Expected:
+
+```
+true
+```
+
+### 3.3 Verify default cluster storage mode
 
 ```bash
 kubectl exec -n redpanda redpanda-0 -c redpanda -- rpk cluster config get default_redpanda_storage_mode
@@ -407,6 +435,7 @@ spec:
           cloud_storage_credentials_source: config_file
     config:
       cluster:
+        cloud_topics_enabled: true
         default_redpanda_storage_mode: cloud
 EOF
 ```
@@ -579,6 +608,7 @@ spec:
           cloud_storage_credentials_source: config_file
     config:
       cluster:
+        cloud_topics_enabled: true
         default_redpanda_storage_mode: tiered
 EOF
 ```
@@ -677,6 +707,7 @@ spec:
           cloud_storage_credentials_source: config_file
     config:
       cluster:
+        cloud_topics_enabled: true
         default_redpanda_storage_mode: local
 EOF
 ```
@@ -775,6 +806,7 @@ spec:
           cloud_storage_credentials_source: config_file
     config:
       cluster:
+        cloud_topics_enabled: true
         default_redpanda_storage_mode: unset
 EOF
 ```
