@@ -1,6 +1,8 @@
 # Cloud Topics: The Hard Way
 
-Manual, step-by-step guide for testing `redpanda.storage.mode` and `default_redpanda_storage_mode` using the Redpanda Kubernetes Operator. All cluster configuration is applied exclusively through Custom Resource objects. `rpk` is only used to **verify** configs and **describe** topics.
+Manual, step-by-step guide for testing `redpanda.storage.mode` and `default_redpanda_storage_mode` using the Redpanda Kubernetes Operator. All cluster configuration is applied exclusively through Custom Resource objects. Topic configuration is verified by reading the Topic CR status via `kubectl`. Cluster configuration is verified via `rpk cluster config get` (read-only).
+
+**No `rpk cluster config set` or `rpk topic` commands are used.** All mutations go through CRs.
 
 ## Prerequisites
 
@@ -8,6 +10,48 @@ Manual, step-by-step guide for testing `redpanda.storage.mode` and `default_redp
 - [kind](https://kind.sigs.k8s.io/) installed
 - [kubectl](https://kubernetes.io/docs/tasks/tools/) installed
 - [Helm](https://helm.sh/) installed
+
+---
+
+## Conventions Used in This Guide
+
+### Verifying topic configuration via the Topic CR status
+
+The Topic controller writes the full topic configuration snapshot into `.status.topicConfiguration[]`. Each entry has `name`, `value`, and `source` fields. To inspect the storage-related properties of a topic:
+
+```bash
+kubectl get topic <TOPIC_NAME> -n redpanda -o jsonpath='{range .status.topicConfiguration[*]}{.name}={.value} ({.source}){"\n"}{end}' | grep -E "storage\.mode|remote\.read|remote\.write"
+```
+
+Example output:
+
+```
+redpanda.remote.read=true (DEFAULT_CONFIG)
+redpanda.remote.write=true (DEFAULT_CONFIG)
+redpanda.storage.mode=cloud (DEFAULT_CONFIG)
+```
+
+The `source` field indicates where the value came from:
+- `DEFAULT_CONFIG` - inherited from cluster defaults
+- `DYNAMIC_TOPIC_CONFIG` - explicitly set on the topic
+
+### Verifying cluster configuration
+
+Cluster-level properties are verified (read-only) via:
+
+```bash
+kubectl exec -n redpanda redpanda-0 -c redpanda -- rpk cluster config get <PROPERTY_NAME>
+```
+
+### Waiting for Topic CR readiness
+
+After applying a Topic CR, wait for reconciliation:
+
+```bash
+kubectl get topic <TOPIC_NAME> -n redpanda -w
+```
+
+Wait until `READY` shows `True`, then Ctrl-C. The `.status.topicConfiguration` is only populated after successful reconciliation.
 
 ---
 
@@ -294,22 +338,21 @@ EOF
 Wait for the topic to be ready:
 
 ```bash
-kubectl get topics test-default-mode -n redpanda -w
+kubectl get topic test-default-mode -n redpanda -w
 ```
 
-Wait until `READY` shows `True`, then Ctrl-C and verify:
+Once `READY` is `True`, verify via the Topic CR status:
 
 ```bash
-kubectl exec -n redpanda redpanda-0 -c redpanda -- \
-  rpk topic describe test-default-mode -c | grep -E "storage.mode|remote.read|remote.write"
+kubectl get topic test-default-mode -n redpanda -o jsonpath='{range .status.topicConfiguration[*]}{.name}={.value} ({.source}){"\n"}{end}' | grep -E "storage\.mode|remote\.read|remote\.write"
 ```
 
 Expected:
 
 ```
-redpanda.remote.read                  true           DEFAULT_CONFIG
-redpanda.remote.write                 true           DEFAULT_CONFIG
-redpanda.storage.mode                 unset          DEFAULT_CONFIG
+redpanda.remote.read=true (DEFAULT_CONFIG)
+redpanda.remote.write=true (DEFAULT_CONFIG)
+redpanda.storage.mode=unset (DEFAULT_CONFIG)
 ```
 
 **Result: PASS** - Topic inherits `unset` from cluster default. Legacy `remote.read`/`remote.write` are `true` from cluster defaults.
@@ -374,7 +417,7 @@ spec:
 EOF
 ```
 
-**Step 2** - Wait for the operator to reconcile and the cluster to indicate a restart is needed:
+**Step 2** - Wait for the operator to reconcile:
 
 ```bash
 kubectl get redpanda -n redpanda -w
@@ -489,15 +532,13 @@ cloud
 Also check the Redpanda CR status to confirm no configuration errors:
 
 ```bash
-kubectl describe redpanda redpanda -n redpanda | grep -A3 ConfigurationApplied
+kubectl get redpanda redpanda -n redpanda -o jsonpath='{range .status.conditions[?(@.type=="ConfigurationApplied")]}{.type}: {.status} ({.reason}){"\n"}{end}'
 ```
 
-Expected (Status should be `True`):
+Expected:
 
 ```
-    Reason:                Synced
-    Status:                True
-    Type:                  ConfigurationApplied
+ConfigurationApplied: True (Synced)
 ```
 
 ---
@@ -525,25 +566,24 @@ EOF
 Wait for the topic to be ready:
 
 ```bash
-kubectl get topics test-cloud-inherit -n redpanda -w
+kubectl get topic test-cloud-inherit -n redpanda -w
 ```
 
-Verify:
+Verify via the Topic CR status:
 
 ```bash
-kubectl exec -n redpanda redpanda-0 -c redpanda -- \
-  rpk topic describe test-cloud-inherit -c | grep -E "storage.mode|remote.read|remote.write"
+kubectl get topic test-cloud-inherit -n redpanda -o jsonpath='{range .status.topicConfiguration[*]}{.name}={.value} ({.source}){"\n"}{end}' | grep -E "storage\.mode|remote\.read|remote\.write"
 ```
 
 Expected:
 
 ```
-redpanda.remote.read                  true           DEFAULT_CONFIG
-redpanda.remote.write                 true           DEFAULT_CONFIG
-redpanda.storage.mode                 cloud          DEFAULT_CONFIG
+redpanda.remote.read=true (DEFAULT_CONFIG)
+redpanda.remote.write=true (DEFAULT_CONFIG)
+redpanda.storage.mode=cloud (DEFAULT_CONFIG)
 ```
 
-**Result: PASS** - Topic inherited `cloud` from the cluster's `default_redpanda_storage_mode`. Note the source is `DEFAULT_CONFIG`, meaning it came from the cluster default, not an explicit topic-level setting.
+**Result: PASS** - Topic inherited `cloud` from the cluster's `default_redpanda_storage_mode`. The source is `DEFAULT_CONFIG`, confirming it came from the cluster default, not an explicit topic-level setting.
 
 ---
 
@@ -572,16 +612,15 @@ EOF
 Wait for the topic to be ready, then verify:
 
 ```bash
-kubectl exec -n redpanda redpanda-0 -c redpanda -- \
-  rpk topic describe test-cloud-override-local -c | grep -E "storage.mode|remote.read|remote.write"
+kubectl get topic test-cloud-override-local -n redpanda -o jsonpath='{range .status.topicConfiguration[*]}{.name}={.value} ({.source}){"\n"}{end}' | grep -E "storage\.mode|remote\.read|remote\.write"
 ```
 
 Expected:
 
 ```
-redpanda.remote.read                  true           DEFAULT_CONFIG
-redpanda.remote.write                 true           DEFAULT_CONFIG
-redpanda.storage.mode                 local          DYNAMIC_TOPIC_CONFIG
+redpanda.remote.read=true (DEFAULT_CONFIG)
+redpanda.remote.write=true (DEFAULT_CONFIG)
+redpanda.storage.mode=local (DYNAMIC_TOPIC_CONFIG)
 ```
 
 **Result: PASS** - Topic-level `local` overrides cluster `cloud` default. Source is `DYNAMIC_TOPIC_CONFIG` confirming it was set explicitly on the topic.
@@ -645,7 +684,7 @@ spec:
 EOF
 ```
 
-Wait for reconciliation, then verify:
+Wait for reconciliation, then verify the cluster config:
 
 ```bash
 kubectl exec -n redpanda redpanda-0 -c redpanda -- rpk cluster config get default_redpanda_storage_mode
@@ -671,19 +710,18 @@ spec:
 EOF
 ```
 
-Verify:
+Wait for the topic to be ready, then verify:
 
 ```bash
-kubectl exec -n redpanda redpanda-0 -c redpanda -- \
-  rpk topic describe test-tiered-inherit -c | grep -E "storage.mode|remote.read|remote.write"
+kubectl get topic test-tiered-inherit -n redpanda -o jsonpath='{range .status.topicConfiguration[*]}{.name}={.value} ({.source}){"\n"}{end}' | grep -E "storage\.mode|remote\.read|remote\.write"
 ```
 
 Expected:
 
 ```
-redpanda.remote.read                  true           DEFAULT_CONFIG
-redpanda.remote.write                 true           DEFAULT_CONFIG
-redpanda.storage.mode                 tiered         DEFAULT_CONFIG
+redpanda.remote.read=true (DEFAULT_CONFIG)
+redpanda.remote.write=true (DEFAULT_CONFIG)
+redpanda.storage.mode=tiered (DEFAULT_CONFIG)
 ```
 
 **Result: PASS** - Topic inherited `tiered` from cluster default.
@@ -747,7 +785,7 @@ spec:
 EOF
 ```
 
-Wait for reconciliation, then verify:
+Wait for reconciliation, then verify the cluster config:
 
 ```bash
 kubectl exec -n redpanda redpanda-0 -c redpanda -- rpk cluster config get default_redpanda_storage_mode
@@ -773,19 +811,18 @@ spec:
 EOF
 ```
 
-Verify:
+Wait for the topic to be ready, then verify:
 
 ```bash
-kubectl exec -n redpanda redpanda-0 -c redpanda -- \
-  rpk topic describe test-local-inherit -c | grep -E "storage.mode|remote.read|remote.write"
+kubectl get topic test-local-inherit -n redpanda -o jsonpath='{range .status.topicConfiguration[*]}{.name}={.value} ({.source}){"\n"}{end}' | grep -E "storage\.mode|remote\.read|remote\.write"
 ```
 
 Expected:
 
 ```
-redpanda.remote.read                  true           DEFAULT_CONFIG
-redpanda.remote.write                 true           DEFAULT_CONFIG
-redpanda.storage.mode                 local          DEFAULT_CONFIG
+redpanda.remote.read=true (DEFAULT_CONFIG)
+redpanda.remote.write=true (DEFAULT_CONFIG)
+redpanda.storage.mode=local (DEFAULT_CONFIG)
 ```
 
 **Result: PASS** - Topic inherited `local` from cluster default.
@@ -878,19 +915,18 @@ spec:
 EOF
 ```
 
-Verify:
+Wait for the topic to be ready, then verify:
 
 ```bash
-kubectl exec -n redpanda redpanda-0 -c redpanda -- \
-  rpk topic describe test-unset-legacy-tiered -c | grep -E "storage.mode|remote.read|remote.write"
+kubectl get topic test-unset-legacy-tiered -n redpanda -o jsonpath='{range .status.topicConfiguration[*]}{.name}={.value} ({.source}){"\n"}{end}' | grep -E "storage\.mode|remote\.read|remote\.write"
 ```
 
 Expected:
 
 ```
-redpanda.remote.read                  true           DEFAULT_CONFIG
-redpanda.remote.write                 true           DEFAULT_CONFIG
-redpanda.storage.mode                 unset          DEFAULT_CONFIG
+redpanda.remote.read=true (DEFAULT_CONFIG)
+redpanda.remote.write=true (DEFAULT_CONFIG)
+redpanda.storage.mode=unset (DEFAULT_CONFIG)
 ```
 
 **Result: PASS** - With `storage.mode=unset`, `remote.read=true` and `remote.write=true` enable tiered storage via the legacy mechanism.
@@ -916,22 +952,21 @@ spec:
 EOF
 ```
 
-Verify:
+Wait for the topic to be ready, then verify:
 
 ```bash
-kubectl exec -n redpanda redpanda-0 -c redpanda -- \
-  rpk topic describe test-unset-legacy-local -c | grep -E "storage.mode|remote.read|remote.write"
+kubectl get topic test-unset-legacy-local -n redpanda -o jsonpath='{range .status.topicConfiguration[*]}{.name}={.value} ({.source}){"\n"}{end}' | grep -E "storage\.mode|remote\.read|remote\.write"
 ```
 
 Expected:
 
 ```
-redpanda.remote.read                  false          DYNAMIC_TOPIC_CONFIG
-redpanda.remote.write                 false          DYNAMIC_TOPIC_CONFIG
-redpanda.storage.mode                 unset          DEFAULT_CONFIG
+redpanda.remote.read=false (DYNAMIC_TOPIC_CONFIG)
+redpanda.remote.write=false (DYNAMIC_TOPIC_CONFIG)
+redpanda.storage.mode=unset (DEFAULT_CONFIG)
 ```
 
-**Result: PASS** - With `storage.mode=unset`, `remote.read=false` and `remote.write=false` disable tiered storage via the legacy mechanism.
+**Result: PASS** - With `storage.mode=unset`, `remote.read=false` and `remote.write=false` disable tiered storage via the legacy mechanism. Source is `DYNAMIC_TOPIC_CONFIG` because these values were explicitly set on the topic, overriding the cluster defaults of `true`.
 
 ---
 
@@ -961,19 +996,18 @@ spec:
 EOF
 ```
 
-Verify:
+Wait for the topic to be ready, then verify:
 
 ```bash
-kubectl exec -n redpanda redpanda-0 -c redpanda -- \
-  rpk topic describe test-tiered-ignores-legacy -c | grep -E "storage.mode|remote.read|remote.write"
+kubectl get topic test-tiered-ignores-legacy -n redpanda -o jsonpath='{range .status.topicConfiguration[*]}{.name}={.value} ({.source}){"\n"}{end}' | grep -E "storage\.mode|remote\.read|remote\.write"
 ```
 
 Expected:
 
 ```
-redpanda.remote.read                  false          DYNAMIC_TOPIC_CONFIG
-redpanda.remote.write                 false          DYNAMIC_TOPIC_CONFIG
-redpanda.storage.mode                 tiered         DYNAMIC_TOPIC_CONFIG
+redpanda.remote.read=false (DYNAMIC_TOPIC_CONFIG)
+redpanda.remote.write=false (DYNAMIC_TOPIC_CONFIG)
+redpanda.storage.mode=tiered (DYNAMIC_TOPIC_CONFIG)
 ```
 
 **Result: PASS** - `storage.mode=tiered` takes precedence. Although `remote.read/write` show as `false`, the topic operates as a tiered storage topic because `storage.mode=tiered` governs the behavior.
@@ -1000,19 +1034,18 @@ spec:
 EOF
 ```
 
-Verify:
+Wait for the topic to be ready, then verify:
 
 ```bash
-kubectl exec -n redpanda redpanda-0 -c redpanda -- \
-  rpk topic describe test-local-ignores-legacy -c | grep -E "storage.mode|remote.read|remote.write"
+kubectl get topic test-local-ignores-legacy -n redpanda -o jsonpath='{range .status.topicConfiguration[*]}{.name}={.value} ({.source}){"\n"}{end}' | grep -E "storage\.mode|remote\.read|remote\.write"
 ```
 
 Expected:
 
 ```
-redpanda.remote.read                  true           DEFAULT_CONFIG
-redpanda.remote.write                 true           DEFAULT_CONFIG
-redpanda.storage.mode                 local          DYNAMIC_TOPIC_CONFIG
+redpanda.remote.read=true (DEFAULT_CONFIG)
+redpanda.remote.write=true (DEFAULT_CONFIG)
+redpanda.storage.mode=local (DYNAMIC_TOPIC_CONFIG)
 ```
 
 **Result: PASS** - `storage.mode=local` takes precedence. Although `remote.read/write` show as `true` (from cluster defaults), the topic operates as a local-only topic.
@@ -1039,19 +1072,18 @@ spec:
 EOF
 ```
 
-Verify:
+Wait for the topic to be ready, then verify:
 
 ```bash
-kubectl exec -n redpanda redpanda-0 -c redpanda -- \
-  rpk topic describe test-cloud-ignores-legacy -c | grep -E "storage.mode|remote.read|remote.write"
+kubectl get topic test-cloud-ignores-legacy -n redpanda -o jsonpath='{range .status.topicConfiguration[*]}{.name}={.value} ({.source}){"\n"}{end}' | grep -E "storage\.mode|remote\.read|remote\.write"
 ```
 
 Expected:
 
 ```
-redpanda.remote.read                  false          DYNAMIC_TOPIC_CONFIG
-redpanda.remote.write                 false          DYNAMIC_TOPIC_CONFIG
-redpanda.storage.mode                 cloud          DYNAMIC_TOPIC_CONFIG
+redpanda.remote.read=false (DYNAMIC_TOPIC_CONFIG)
+redpanda.remote.write=false (DYNAMIC_TOPIC_CONFIG)
+redpanda.storage.mode=cloud (DYNAMIC_TOPIC_CONFIG)
 ```
 
 **Result: PASS** - `storage.mode=cloud` takes precedence. Cloud Topics use a completely different storage framework; `remote.read/write` are meaningless in this mode.
@@ -1071,7 +1103,7 @@ redpanda.storage.mode                 cloud          DYNAMIC_TOPIC_CONFIG
 | 7 | Cluster `default_redpanda_storage_mode=tiered` via CR, topic inherits | `tiered` | `DEFAULT_CONFIG` | **PASS** |
 | 8 | Cluster `default_redpanda_storage_mode=local` via CR, topic inherits | `local` | `DEFAULT_CONFIG` | **PASS** |
 | 9a | `unset` + `remote.read/write=true` (legacy tiered) | `unset` | `DEFAULT_CONFIG` | **PASS** |
-| 9b | `unset` + `remote.read/write=false` (legacy local) | `unset` | `DEFAULT_CONFIG` | **PASS** |
+| 9b | `unset` + `remote.read/write=false` (legacy local) | `unset` | `DYNAMIC_TOPIC_CONFIG` | **PASS** |
 | 10a | `tiered` ignores `remote.read/write=false` | `tiered` | `DYNAMIC_TOPIC_CONFIG` | **PASS** |
 | 10b | `local` ignores `remote.read/write=true` | `local` | `DYNAMIC_TOPIC_CONFIG` | **PASS** |
 | 10c | `cloud` ignores `remote.read/write=false` | `cloud` | `DYNAMIC_TOPIC_CONFIG` | **PASS** |
